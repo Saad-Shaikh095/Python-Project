@@ -1,89 +1,77 @@
-import requests
 import streamlit as st
-import time
+import google.generativeai as genai
 
-# Hugging Face API setup
-API_URL = "https://api-inference.huggingface.co/models/deepseek-ai/deepseek-coder-1.3b-base"
-headers = {"Authorization": "Bearer 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"}
+# --- Gemini API Key Configuration ---
+API_KEY = "Your API Key"
+genai.configure(api_key=API_KEY)
 
-# Send prompt to Hugging Face
-def query_model(prompt):
-    payload = {
-        "inputs": prompt,
-        "parameters": {"temperature": 0.2, "max_new_tokens": 300}
-    }
-    response = requests.post(API_URL, headers=headers, json=payload)
+# --- Model Setup ---
+MODEL_NAME = "gemini-1.5-flash-latest"
 
-    if response.status_code == 503:
-        st.warning("Model is loading... please wait ⏳")
-        time.sleep(5)
-        return query_model(prompt)
-    elif response.status_code != 200:
-        st.error(f"API error {response.status_code}: {response.text}")
-        return None
+try:
+    model = genai.GenerativeModel(
+        MODEL_NAME,
+        system_instruction=(
+            "You are an AI Code Generator. Your task is to generate clean, efficient, and well-commented code "
+            "based on the user's prompt and programming language. Only output raw code."
+        )
+    )
+except Exception as e:
+    st.error(f"Model initialization failed: {e}")
+    st.stop()
 
-    try:
-        return response.json()
-    except:
-        st.error("Failed to parse response.")
-        return None
+# --- Streamlit App Configuration ---
+st.set_page_config(page_title="🤖 AI Code Generator", page_icon="💻", layout="centered")
 
-# Streamlit UI
-st.set_page_config(page_title="💻 AI Code Generator", layout="centered")
-st.title("💻 AI Code Generator (via Hugging Face DeepSeek)")
-st.markdown("Generate clean code from natural language prompts using free Hugging Face models.")
+st.title("💻 AI Code Generator (Gemini)")
+st.markdown("Create clean and efficient code from natural language prompts using Google Gemini!")
 
-# Theme selection
-theme = st.selectbox("Choose Theme:", ["Light", "Dark"])
+# --- User Input ---
+prompt = st.text_area("📝 Describe what you want the code to do", height=150)
+language = st.selectbox("💡 Choose Programming Language", ["Python", "JavaScript", "C++", "Java", "Go", "auto"])
 
-# Apply working theme using HTML style block
-def set_theme(theme):
-    if theme == "Dark":
-        st.markdown("""
-            <style>
-            html, body, [class*="css"] {
-                background-color: #0e1117 !important;
-                color: white !important;
-            }
-            textarea, input, select {
-                background-color: #262730 !important;
-                color: white !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-            <style>
-            html, body, [class*="css"] {
-                background-color: white !important;
-                color: black !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
-set_theme(theme)
-
-# Prompt + Language Input
-prompt = st.text_area("Enter your coding prompt:", height=150)
-language = st.selectbox("Select programming language (for formatting)", ["Python", "C++", "JavaScript", "Java", "HTML", "Other"])
-
-# Generate Button
-if st.button("⚙️ Generate Code"):
+# --- Generate Code Button ---
+if st.button("🚀 Generate Code"):
     if not prompt.strip():
-        st.warning("Please enter a prompt.")
+        st.warning("Please enter a prompt first.")
     else:
-        with st.spinner("Generating code..."):
-            result = query_model(prompt)
-            if result and isinstance(result, list) and "generated_text" in result[0]:
-                raw_code = result[0]["generated_text"]
-                cleaned_code = raw_code.replace(prompt, "").strip()
-                st.code(cleaned_code, language=language.lower())
+        st.info("Generating code... Please wait ⏳")
+        try:
+            full_prompt = (
+                f"Generate {language} code for the following task: {prompt}"
+                if language.lower() != "auto"
+                else f"Generate code for the following task: {prompt}. Try to infer the language."
+            )
 
-                # Add download button
-                file_extension = {
-                    "Python": "py", "C++": "cpp", "JavaScript": "js",
-                    "Java": "java", "HTML": "html", "Other": "txt"
-                }.get(language, "txt")
-                st.download_button("📥 Download Code", cleaned_code, file_name=f"generated_code.{file_extension}")
-            else:
-                st.error("❌ The model did not return proper code.")
+            response = model.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=2048,
+                    temperature=0.4
+                ),
+                safety_settings={
+                    genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                    genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                }
+            )
+
+            generated_code = response.text.strip()
+            st.success("✅ Code generated successfully!")
+            st.code(generated_code, language=language.lower() if language.lower() != "auto" else "python")
+
+            # --- Optional Download Button ---
+            file_ext = {
+                "Python": "py", "JavaScript": "js", "C++": "cpp", "Java": "java", "Go": "go", "auto": "txt"
+            }.get(language, "txt")
+
+            st.download_button(
+                label="📥 Download Code",
+                data=generated_code,
+                file_name=f"generated_code.{file_ext}",
+                mime="text/plain"
+            )
+
+        except Exception as e:
+            st.error(f"❌ Error generating code: {e}")
